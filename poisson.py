@@ -1,13 +1,23 @@
+# Solving Poisson via Domain Decomposition in FEniCSx
+
+# -- ASM (Addititve Schwarz Method) pc_asm_type basic
+#    -- produces symettric preconditioner (R = R^T)
+# -- RAS (Restricted Additive Schwarz) pc_asm_type restrict
+#    -- produces nonsymmetric preconditioner (R != R^T)
+
+# Run with mpirun -np 4 python poisson.py
+
 from pathlib import Path
 
 from mpi4py import MPI
+from petsc4py import PETSc
 from petsc4py.PETSc import ScalarType  # type: ignore
 
 import numpy as np
 
 import ufl
 from dolfinx import fem, io, mesh, plot
-from dolfinx.fem.petsc import LinearProblem
+from dolfinx.fem.petsc import assemble_matrix, assemble_vector, apply_lifting, set_bc
 
 msh = mesh.create_rectangle(
     comm=MPI.COMM_WORLD,
@@ -27,7 +37,6 @@ facets = mesh.locate_entities_boundary(
 
 dofs = fem.locate_dofs_topological(V=V, entity_dim=fdim, entities=facets)
 
-
 bc = fem.dirichletbc(value=ScalarType(0), dofs=dofs, V=V)
 
 u = ufl.TrialFunction(V)
@@ -38,19 +47,48 @@ g = ufl.sin(5 * x[0])
 a = ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
 L = ufl.inner(f, v) * ufl.dx + ufl.inner(g, v) * ufl.ds
 
-problem = LinearProblem(
-    a,
-    L,
-    bcs=[bc],
-    petsc_options_prefix="demo_poisson_",
-    petsc_options={
-        "ksp_type": "preonly",
-        "pc_type": "lu",
-        "ksp_error_if_not_converged": True,
-    },
-)
-uh = problem.solve()
-assert isinstance(uh, fem.Function)
+# Compile forms
+a_form = fem.form(a)
+L_form = fem.form(L)
+
+# Assemble matrix with BCs applied
+A = assemble_matrix(a_form, bcs=[bc])
+A.assemble()
+
+# Assemble RHS vector with lifting for inhomogeneous BCs
+b = assemble_vector(L_form)
+apply_lifting(b, [a_form], bcs=[[bc]])
+b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+set_bc(b, [bc])
+
+# Set up the KSP solver explicitly
+ksp = PETSc.KSP().create(msh.comm)
+ksp.setOperators(A)
+ksp.setOptionsPrefix("demo_poisson_")
+opts = PETSc.Options()
+opts.prefixPush("demo_poisson_")
+opts["ksp_type"] = "cg"
+opts["pc_type"] = "asm"
+opts["pc_asm_type"] = "basic"
+opts["sub_pc_type"] = "cholesky"
+opts["ksp_error_if_not_converged"] = True
+opts.prefixPop()
+ksp.setFromOptions()
+
+
+def monitor(ksp, its, rnorm):
+    PETSc.Sys.Print(f"  iter {its:4d}  residual = {rnorm:.6e}", comm=msh.comm)
+
+
+ksp.setMonitor(monitor)
+
+# Solve
+uh = fem.Function(V)
+ksp.solve(b, uh.x.petsc_vec)
+uh.x.scatter_forward()
+
+# ksp.view()
+
 
 out_folder = Path("out_poisson")
 out_folder.mkdir(parents=True, exist_ok=True)
@@ -58,21 +96,21 @@ with io.XDMFFile(msh.comm, out_folder / "poisson.xdmf", "w") as file:
     file.write_mesh(msh)
     file.write_function(uh)
 
-try:
-    import pyvista
+# try:
+#     import pyvista
 
-    cells, types, x = plot.vtk_mesh(V)
-    grid = pyvista.UnstructuredGrid(cells, types, x)
-    grid.point_data["u"] = uh.x.array.real
-    grid.set_active_scalars("u")
-    plotter = pyvista.Plotter()
-    plotter.add_mesh(grid, show_edges=True)
-    warped = grid.warp_by_scalar()
-    plotter.add_mesh(warped)
-    if pyvista.OFF_SCREEN:
-        plotter.screenshot(out_folder / "uh_poisson.png")
-    else:
-        plotter.show()
-except ModuleNotFoundError:
-    print("'pyvista' is required to visualise the solution.")
-    print("To install pyvista with pip: 'python3 -m pip install pyvista'.")
+#     cells, types, x = plot.vtk_mesh(V)
+#     grid = pyvista.UnstructuredGrid(cells, types, x)
+#     grid.point_data["u"] = uh.x.array.real
+#     grid.set_active_scalars("u")
+#     plotter = pyvista.Plotter()
+#     plotter.add_mesh(grid, show_edges=True)
+#     warped = grid.warp_by_scalar()
+#     plotter.add_mesh(warped)
+#     if pyvista.OFF_SCREEN:
+#         plotter.screenshot(out_folder / "uh_poisson.png")
+#     else:
+#         plotter.show()
+# except ModuleNotFoundError:
+#     print("'pyvista' is required to visualise the solution.")
+#     print("To install pyvista with pip: 'python3 -m pip install pyvista'.")
