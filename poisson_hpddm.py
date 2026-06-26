@@ -64,17 +64,17 @@ A.assemble()
 
 # A_local = create_matrix(a_form, kind=PETSc.Mat.Type.SEQAIJ)
 
-im = V.dofmap.index_map
-bs = V.dofmap.index_map_bs
-n_local_ghosted = (im.size_local + im.num_ghosts) * bs
+# im = V.dofmap.index_map
+# bs = V.dofmap.index_map_bs
+# n_local_ghosted = (im.size_local + im.num_ghosts) * bs
 
-A_local = PETSc.Mat().createAIJ(
-    size=((n_local_ghosted, n_local_ghosted), (n_local_ghosted, n_local_ghosted)),
-    comm=PETSc.COMM_SELF,
-)
+# A_local = PETSc.Mat().createAIJ(
+#     size=((n_local_ghosted, n_local_ghosted), (n_local_ghosted, n_local_ghosted)),
+#     comm=PETSc.COMM_SELF,
+# )
 
-print(A_local.getSize())
-assemble_matrix(A_local, a_form, bcs=[])
+# print(A_local.getSize())
+# assemble_matrix(A_local, a_form, bcs=[])
 
 # Assemble RHS vector with lifting for inhomogeneous BCs
 b = assemble_vector(L_form)
@@ -92,9 +92,10 @@ opts.prefixPush("demo_poisson_")
 # opts["pc_type"] = "asm"
 # opts["pc_asm_type"] = "basic"
 # opts["sub_pc_type"] = "cholesky"
-opts["pc_hpddm_levels_1_eps_nev"] = 1
+opts["pc_hpddm_levels_1_eps_nev"] = 4
 opts["pc_hpddm_levels_1_st_pc_type"] = "cholesky"
-
+opts["pc_hpddm_levels_1_st_pc_type"] = "lu"
+opts["pc_hpddm_levels_1_st_pc_factor_shift_type"] = "nonzero"
 
 opts["ksp_error_if_not_converged"] = True
 opts.prefixPop()
@@ -113,16 +114,38 @@ def monitor(ksp, its, rnorm):
 # print(arr)
 # print(arr.shape)
 
-# Get the local-to-global column map (includes ghosts)
-lgmap = A.getLGMap()[1]  # column local-to-global mapping
-global_cols = lgmap.getIndices()  # global indices this rank sees (owned + ghost)
+# # Get the local-to-global column map (includes ghosts)
+# lgmap = A.getLGMap()[1]  # column local-to-global mapping
+# global_cols = lgmap.getIndices()  # global indices this rank sees (owned + ghost)
 
-# Build an IS of those global indices
+# # Build an IS of those global indices
+# is_local = PETSc.IS().createGeneral(global_cols, comm=PETSc.COMM_SELF)
+
+
+# # Extract the submatrix: local rows x (local+ghost cols)
+# A_local = A.createSubMatrices(is_local, iscols=is_local)[0]
+# A_local.zeroEntries()
+
+# assemble_matrix(A_local, a_form, bcs=[])
+# A_local.assemble()
+
+A_matis = A.convert(PETSc.Mat.Type.IS)
+
+A_local = A_matis.getISLocalMat()
+
+lgmap = A_matis.getLGMap()[1]
+global_cols = lgmap.getIndices()
+
 is_local = PETSc.IS().createGeneral(global_cols, comm=PETSc.COMM_SELF)
 
-# Extract the submatrix: local rows x (local+ghost cols)
-A_local = A.createSubMatrices(is_local, iscols=is_local)[0]
+# A_local.zeroEntries()
+assemble_matrix(A_local, a_form, bcs=[])
+A_local.assemble()
 
+# A.zeroEntries()
+# A = assemble_matrix(a_form, bcs=[bc])
+# A.assemble()
+# exit()
 # A_local.view()
 
 
