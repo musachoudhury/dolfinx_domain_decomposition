@@ -72,8 +72,10 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(
 
   const std::size_t tdim = mesh.topology()->dim();
   // const std::size_t gdim = mesh.geometry().dim();
-  std::size_t ncells = mesh.topology()->index_map(tdim)->size_local();
-  std::size_t num_vertices = mesh.topology()->index_map(0)->size_local();
+  std::size_t ncells = mesh.topology()->index_map(tdim)->size_local() +
+                       mesh.topology()->index_map(tdim)->num_ghosts();
+
+  //  std::size_t num_vertices = mesh.topology()->index_map(0)->size_local();
 
   // Find which local vertices are ghosted elsewhere
   auto vertex_destinations =
@@ -81,8 +83,6 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(
 
   // cell to vertex AdjacencyList
   auto c_to_v = mesh.topology()->connectivity(tdim, 0);
-
-  print_mesh_details(mesh);
 
   // Map from any local cells to processes where they should be ghosted
   std::map<int, std::vector<int>> cell_to_dests;
@@ -128,15 +128,14 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(
       // Ghost to other processes
       offsets.push_back(dests.size());
     }
+
+    spdlog::debug("Partitioner: Adjacency list with {} entries",
+                  offsets.size() - 1);
     return dolfinx::graph::AdjacencyList<std::int32_t>(std::move(dests),
                                                        std::move(offsets));
   };
 
-  // FIXME: mesh.geometry().x().data() always stored with 3 components per
-  // points
-  // Bugged version:
-  // std::array<std::size_t, 2> xshape = {num_vertices, gdim};
-  //
+  std::size_t num_vertices = mesh.geometry().index_map()->size_local();
   std::array<std::size_t, 2> xshape = {num_vertices, 3};
   std::span<T> x(mesh.geometry().x().data(), xshape[0] * xshape[1]);
 
@@ -159,13 +158,13 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(
   std::vector<std::int64_t> permuted_dofmap_global(permuted_dofmap.size());
   imap->local_to_global(permuted_dofmap, permuted_dofmap_global);
 
+  spdlog::debug("Call create_mesh");
+
   std::optional<std::int32_t> max_facet_to_cell_links; // = 2;
   auto new_mesh = dolfinx::mesh::create_mesh(
       mesh.comm(), mesh.comm(), std::span(permuted_dofmap_global),
       coord_element, mesh.comm(), x, xshape, partitioner,
       max_facet_to_cell_links, reorder_fn);
-
-  print_mesh_details(new_mesh);
 
   spdlog::info("** NEW MESH num_ghosts_cells = {}",
                new_mesh.topology()->index_map(tdim)->num_ghosts());
