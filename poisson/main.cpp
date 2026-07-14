@@ -105,7 +105,8 @@ using U = typename dolfinx::scalar_value_t<T>;
 // divided into two triangles, and the finite element space (specified
 // in the form file) defined relative to this mesh, we do as follows:
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[])
+{
   dolfinx::init_logging(argc, argv);
   PetscInitialize(&argc, &argv, nullptr, nullptr);
 
@@ -126,26 +127,30 @@ int main(int argc, char *argv[]) {
     io::VTKFile file0(MPI_COMM_WORLD, "mesh0.pvd", "w");
     file0.write<T>(*base_mesh0, rank);
 
-    // First order coordinate element
-    auto element_1 =
-        std::make_shared<basix::FiniteElement<T>>(basix::create_element<U>(
-            basix::element::family::P,
-            dolfinx::mesh::cell_type_to_basix_type(celltype), 1,
-            basix::element::lagrange_variant::gll_warped,
-            basix::element::dpc_variant::unset, false));
-    dolfinx::fem::CoordinateElement<T> coord_element(element_1);
-
-    auto base_mesh1 = std::make_shared<mesh::Mesh<T>>(
-        ghost_layer_mesh(*base_mesh0, coord_element));
+    auto base_mesh1
+        = std::make_shared<mesh::Mesh<T>>(ghost_layer_mesh(*base_mesh0));
 
     io::VTKFile file1(MPI_COMM_WORLD, "mesh1.pvd", "w");
     file1.write<T>(*base_mesh1, rank);
 
-    auto base_mesh2 = std::make_shared<mesh::Mesh<T>>(
-        ghost_layer_mesh(*base_mesh1, coord_element));
+    std::stringstream s;
+    s << rank << ": ";
+    for (auto q : base_mesh1->topology()->index_map(2)->owners())
+      s << q << " ";
+    s << "\n";
+    std::cout << s.str();
+
+    auto base_mesh2
+        = std::make_shared<mesh::Mesh<T>>(ghost_layer_mesh(*base_mesh1));
 
     io::VTKFile file2(MPI_COMM_WORLD, "mesh2.pvd", "w");
     file2.write<T>(*base_mesh2, rank);
+
+    auto base_mesh3
+        = std::make_shared<mesh::Mesh<T>>(ghost_layer_mesh(*base_mesh2));
+
+    io::VTKFile file3(MPI_COMM_WORLD, "mesh3.pvd", "w");
+    file3.write<T>(*base_mesh3, rank);
 
     /*
 auto V =
