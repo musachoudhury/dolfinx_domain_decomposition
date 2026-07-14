@@ -22,7 +22,7 @@ from dolfinx.fem.petsc import assemble_matrix, assemble_vector, apply_lifting, s
 msh = mesh.create_rectangle(
     comm=MPI.COMM_WORLD,
     points=((0.0, 0.0), (2.0, 1.0)),
-    n=(32, 16),
+    n=(32, 32),
     cell_type=mesh.CellType.triangle,
 )
 V = fem.functionspace(msh, ("Lagrange", 1))
@@ -69,6 +69,7 @@ opts = PETSc.Options()
 opts.prefixPush("demo_poisson_")
 opts["ksp_type"] = "cg"
 opts["pc_type"] = "asm"
+opts["pc_asm_overlap"] = 4
 opts["pc_asm_type"] = "basic"
 opts["sub_pc_type"] = "cholesky"
 opts["ksp_error_if_not_converged"] = True

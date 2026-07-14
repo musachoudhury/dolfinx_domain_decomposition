@@ -1,7 +1,7 @@
 # Solving Poisson via Domain Decomposition in FEniCSx
 
 # -- ASM (Addititve Schwarz Method) pc_asm_type basic
-#    -- produces symettric preconditioner (R = R^T)
+#    -- produces symmetric preconditioner (R = R^T)
 # -- RAS (Restricted Additive Schwarz) pc_asm_type restrict
 #    -- produces nonsymmetric preconditioner (R != R^T)
 
@@ -29,7 +29,7 @@ from dolfinx.fem.petsc import (
 msh = mesh.create_rectangle(
     comm=MPI.COMM_WORLD,
     points=((0.0, 0.0), (2.0, 1.0)),
-    n=(10, 10),
+    n=(20, 20),
     cell_type=mesh.CellType.quadrilateral,
 )
 V = fem.functionspace(msh, ("Lagrange", 1))
@@ -92,7 +92,7 @@ opts.prefixPush("demo_poisson_")
 # opts["pc_type"] = "asm"
 # opts["pc_asm_type"] = "basic"
 # opts["sub_pc_type"] = "cholesky"
-opts["pc_hpddm_levels_1_eps_nev"] = 4
+opts["pc_hpddm_levels_1_eps_nev"] = 1
 opts["pc_hpddm_levels_1_st_pc_type"] = "cholesky"
 opts["pc_hpddm_levels_1_st_pc_type"] = "lu"
 opts["pc_hpddm_levels_1_st_pc_factor_shift_type"] = "nonzero"
