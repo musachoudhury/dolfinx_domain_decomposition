@@ -135,12 +135,6 @@ int main(int argc, char *argv[]) {
             basix::element::dpc_variant::unset, false));
     dolfinx::fem::CoordinateElement<T> coord_element(element_1);
 
-    // auto element = basix::create_element<U>(
-    //     basix::element::family::P,
-    //     dolfinx::mesh::cell_type_to_basix_type(celltype), 1,
-    //     basix::element::lagrange_variant::unset,
-    //     basix::element::dpc_variant::unset, false);
-
     auto base_mesh1 = std::make_shared<mesh::Mesh<T>>(
         ghost_layer_mesh(*base_mesh0, coord_element));
 
@@ -151,7 +145,7 @@ int main(int argc, char *argv[]) {
         ghost_layer_mesh(*base_mesh1, coord_element));
 
     io::VTKFile file2(MPI_COMM_WORLD, "mesh2.pvd", "w");
-    file0.write<T>(*base_mesh2, rank);
+    file2.write<T>(*base_mesh2, rank);
 
     /*
 auto V =

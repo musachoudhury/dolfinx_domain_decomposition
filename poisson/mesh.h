@@ -72,8 +72,10 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(
 
   const std::size_t tdim = mesh.topology()->dim();
   // const std::size_t gdim = mesh.geometry().dim();
-  std::size_t ncells = mesh.topology()->index_map(tdim)->size_local();
-  std::size_t num_vertices = mesh.topology()->index_map(0)->size_local();
+  std::size_t ncells = mesh.topology()->index_map(tdim)->size_local() +
+                       mesh.topology()->index_map(tdim)->num_ghosts();
+
+  //  std::size_t num_vertices = mesh.topology()->index_map(0)->size_local();
 
   // Find which local vertices are ghosted elsewhere
   auto vertex_destinations =
@@ -82,17 +84,12 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(
   // cell to vertex AdjacencyList
   auto c_to_v = mesh.topology()->connectivity(tdim, 0);
 
-  print_mesh_details(mesh);
-
   // Map from any local cells to processes where they should be ghosted
   std::map<int, std::vector<int>> cell_to_dests;
 
   // Loops over cells
   // Assigns destinations to each cell
   std::vector<int> cdests;
-
-  // std::cout << "Hello 0" << std::endl;
-  // MPI_Barrier(MPI_COMM_WORLD);
 
   for (std::size_t c = 0; c < ncells; ++c) {
     cdests.clear();
@@ -107,13 +104,6 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(
       cell_to_dests[c] = cdests;
   }
 
-  // for (std::size_t c = 0; c < ncells; ++c) {
-  //   if (!cdests.empty())
-  //     cell_to_dests[c] = {rank};
-  // }
-
-  // std::cout << "Hello 1" << std::endl;
-  // MPI_Barrier(MPI_COMM_WORLD);
   spdlog::info("cell_to_dests= {}, ncells = {}", cell_to_dests.size(), ncells);
 
   // Builds a cell-to-rank adjacency list
@@ -132,18 +122,14 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(
       // Ghost to other processes
       offsets.push_back(dests.size());
     }
+
+    spdlog::debug("Partitioner: Adjacency list with {} entries",
+                  offsets.size() - 1);
     return dolfinx::graph::AdjacencyList<std::int32_t>(std::move(dests),
                                                        std::move(offsets));
   };
 
-  // std::cout << "Hello 2" << std::endl;
-  // MPI_Barrier(MPI_COMM_WORLD);
-
-  // FIXME: mesh.geometry().x().data() always stored with 3 components per
-  // points
-  // Bugged version:
-  // std::array<std::size_t, 2> xshape = {num_vertices, gdim};
-  //
+  std::size_t num_vertices = mesh.geometry().index_map()->size_local();
   std::array<std::size_t, 2> xshape = {num_vertices, 3};
   std::span<T> x(mesh.geometry().x().data(), xshape[0] * xshape[1]);
 
@@ -160,23 +146,20 @@ dolfinx::mesh::Mesh<T> ghost_layer_mesh(
     auto cell_dofs = std::submdspan(dofmap, c, std::full_extent);
     for (std::size_t i = 0; i < dofmap.extent(1); ++i) {
       permuted_dofmap.push_back(cell_dofs(perm.value()[i]));
-      std::cout << perm.value()[i] << std::endl;
+      //      std::cout << perm.value()[i] << std::endl;
     }
   }
 
   std::vector<std::int64_t> permuted_dofmap_global(permuted_dofmap.size());
   imap->local_to_global(permuted_dofmap, permuted_dofmap_global);
 
-  // std::cout << "Hello 3" << std::endl;
-  // MPI_Barrier(MPI_COMM_WORLD);
+  spdlog::debug("Call create_mesh");
 
   std::optional<std::int32_t> max_facet_to_cell_links; // = 2;
   auto new_mesh = dolfinx::mesh::create_mesh(
       mesh.comm(), mesh.comm(), std::span(permuted_dofmap_global),
       coord_element, mesh.comm(), x, xshape, partitioner,
       max_facet_to_cell_links, reorder_fn);
-
-  print_mesh_details(new_mesh);
 
   spdlog::info("** NEW MESH num_ghosts_cells = {}",
                new_mesh.topology()->index_map(tdim)->num_ghosts());
