@@ -2,7 +2,6 @@
 from mpi4py import MPI
 from dolfinx import io, mesh
 
-
 msh = mesh.create_rectangle(
     comm=MPI.COMM_WORLD,
     points=((0.0, 0.0), (2.0, 1.0)),

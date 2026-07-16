@@ -1,9 +1,4 @@
-# Solving Poisson via Domain Decomposition in FEniCSx
-
-# -- ASM (Addititve Schwarz Method) pc_asm_type basic
-#    -- produces symmetric preconditioner (R = R^T)
-# -- RAS (Restricted Additive Schwarz) pc_asm_type restrict
-#    -- produces nonsymmetric preconditioner (R != R^T)
+# Solving Poisson via HPDDM in FEniCSx
 
 # Run with mpirun -np 4 python poisson.py
 
@@ -15,6 +10,7 @@ from petsc4py.PETSc import ScalarType  # type: ignore
 
 import scipy.sparse as sp
 import numpy as np
+import functools
 
 import ufl
 from dolfinx import fem, io, mesh, plot
@@ -25,14 +21,23 @@ from dolfinx.fem.petsc import (
     set_bc,
     create_matrix,
 )
+from dolfinx import cpp
+from utils import _dm_create_matrix, _dm_create_field_decomposition
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
 
 msh = mesh.create_rectangle(
     comm=MPI.COMM_WORLD,
     points=((0.0, 0.0), (2.0, 1.0)),
-    n=(20, 20),
-    ghost_mode=mesh.GhostMode.shared_facet,
+    n=(32, 32),
+    ghost_mode=mesh.GhostMode.none,
     cell_type=mesh.CellType.quadrilateral,
 )
+
+for i in range(2):
+    msh = mesh.ghost_layer_mesh(msh)
+
 V = fem.functionspace(msh, ("Lagrange", 1))
 
 tdim = msh.topology.dim
@@ -52,21 +57,32 @@ v = ufl.TestFunction(V)
 x = ufl.SpatialCoordinate(msh)
 f = 10 * ufl.exp(-((x[0] - 0.5) ** 2 + (x[1] - 0.5) ** 2) / 0.02)
 g = ufl.sin(5 * x[0])
+
+# Must explicitly assemble over local + ghost cells as default behaviour
+# assembled over local cells
+# HPDDM wants a Neumann matrix that has been assembled over ghost cells as well.
+
+num_cells_local = msh.topology.index_map(tdim).size_local
+num_ghost_cells = msh.topology.index_map(tdim).num_ghosts
+all_cells = np.arange(num_cells_local + num_ghost_cells, dtype=np.int32)
+dx_is = ufl.Measure("dx", domain=msh, subdomain_data=[(1, all_cells)])
+
 a = ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
+a_is = ufl.inner(ufl.grad(u), ufl.grad(v)) * dx_is(1)
 L = ufl.inner(f, v) * ufl.dx + ufl.inner(g, v) * ufl.ds
 
 # Compile forms
-a_form = fem.form(a)
+a_form = fem.form(a_is)
+a_lift_form = fem.form(a)
 L_form = fem.form(L)
 
 # Assemble matrix with BCs applied
 A = assemble_matrix(a_form, bcs=[bc], kind="is")
 A.assemble()
 
-
 # Assemble RHS vector with lifting for inhomogeneous BCs
 b = assemble_vector(L_form)
-apply_lifting(b, [a_form], bcs=[[bc]])
+apply_lifting(b, [a_lift_form], bcs=[[bc]])
 b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
 set_bc(b, [bc])
 
@@ -97,8 +113,11 @@ def monitor(ksp, its, rnorm):
 pc = ksp.getPC()
 pc.setType(PETSc.PC.Type.HPDDM)
 pc.setOperators(A)  # global operator
+
+# No need as A is a IS matrix
 # pc.setHPDDMAuxiliaryMat(is_local, A_local)  # local IS + Neumann mat
 # pc.setHPDDMHasNeumannMat(True)  # tell it aux_mat is a true Neumann mat
+
 pc.setFromOptions()
 pc.setUp()
 
@@ -108,8 +127,15 @@ ksp.setUp()
 
 ksp.setMonitor(monitor)
 
-# Solve
 uh = fem.Function(V)
+
+# Attach PETSc DM
+dm = ksp.getDM()
+dm.setCreateMatrix(functools.partial(_dm_create_matrix, A))
+dm.setCreateFieldDecomposition(functools.partial(_dm_create_field_decomposition, uh, L))
+ksp.getPC().setDM(dm)
+
+# Solve
 ksp.solve(b, uh.x.petsc_vec)
 uh.x.scatter_forward()
 
