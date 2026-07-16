@@ -30,7 +30,7 @@ msh = mesh.create_rectangle(
     comm=MPI.COMM_WORLD,
     points=((0.0, 0.0), (2.0, 1.0)),
     n=(20, 20),
-    # ghost_mode=mesh.GhostMode.none,
+    ghost_mode=mesh.GhostMode.shared_facet,
     cell_type=mesh.CellType.quadrilateral,
 )
 V = fem.functionspace(msh, ("Lagrange", 1))
@@ -76,14 +76,14 @@ ksp.setOperators(A)
 ksp.setOptionsPrefix("demo_poisson_")
 opts = PETSc.Options()
 opts.prefixPush("demo_poisson_")
-# opts["ksp_type"] = "cg"
-# opts["pc_type"] = "asm"
-# opts["pc_asm_type"] = "basic"
-# opts["sub_pc_type"] = "cholesky"
-opts["pc_hpddm_levels_1_eps_nev"] = 1
-opts["pc_hpddm_levels_1_st_pc_type"] = "cholesky"
-opts["pc_hpddm_levels_1_st_pc_type"] = "lu"
-opts["pc_hpddm_levels_1_st_pc_factor_shift_type"] = "nonzero"
+
+opts["pc_hpddm_levels_1_sub_pc_type"] = "lu"
+opts["pc_hpddm_levels_1_eps_nev"] = 10
+opts["pc_hpddm_levels_2_p"] = 1
+opts["pc_hpddm_levels_2_sub_pc_type"] = "lu"
+opts["pc_hpddm_levels_2_eps_nev"] = 10
+opts["pc_hpddm_coarse_p"] = 1
+opts["pc_hpddm_coarse_mat_type"] = "baij"
 
 opts["ksp_error_if_not_converged"] = True
 opts.prefixPop()
@@ -113,7 +113,7 @@ uh = fem.Function(V)
 ksp.solve(b, uh.x.petsc_vec)
 uh.x.scatter_forward()
 
-ksp.view()
+# ksp.view()
 
 
 out_folder = Path("out_poisson")
